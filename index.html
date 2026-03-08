@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Agenda – Sincronizada</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; display: inline-block; }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Input oculto para importación -->
+    <input type="file" id="import-input" accept=".json" class="hidden">
+
+    <!-- Notificación Flotante -->
+    <div id="notification" class="fixed bottom-4 right-4 z-50 transform transition-all duration-300 translate-x-full opacity-0 max-w-xs w-full bg-white border-l-4 p-4 rounded shadow-lg flex items-center gap-3">
+        <div>
+            <p id="notif-title" class="font-bold text-sm"></p>
+            <p id="notif-msg" class="text-xs text-slate-500"></p>
+        </div>
+    </div>
+
+    <!-- PANTALLA PRINCIPAL -->
+    <section id="app-screen" class="flex flex-col h-screen fade-in">
+
+        <!-- Header -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="bg-indigo-600 text-white p-2 rounded-lg shadow-sm">
+                        <i class="ph ph-calendar-check text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-lg leading-tight text-slate-800">Mi Agenda</h1>
+                        <div class="flex items-center gap-2">
+                            <p id="current-date-display" class="text-xs text-slate-500 font-medium"></p>
+                            <button id="cloud-status"
+                                onclick="openCloudConfig()"
+                                title="Estado de sincronización – haz clic para configurar"
+                                class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 cursor-pointer transition-colors">
+                                <i id="cloud-icon" class="ph ph-cloud text-sm"></i>
+                                <span id="cloud-label">Sin configurar</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button onclick="triggerImport()" class="hidden md:flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:text-indigo-600 hover:border-indigo-200 transition-all text-sm font-medium shadow-sm group">
+                        <i class="ph ph-upload-simple text-lg group-hover:scale-110 transition-transform"></i>
+                        <span>Importar</span>
+                    </button>
+                    <button onclick="exportData()" class="hidden md:flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-lg hover:bg-indigo-100 hover:border-indigo-200 transition-all text-sm font-medium shadow-sm group">
+                        <i class="ph ph-download-simple text-lg group-hover:scale-110 transition-transform"></i>
+                        <span>Exportar</span>
+                    </button>
+                    <button onclick="syncNow()" class="hidden md:flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg hover:bg-emerald-100 hover:border-emerald-200 transition-all text-sm font-medium shadow-sm group">
+                        <i class="ph ph-arrows-clockwise text-lg group-hover:scale-110 transition-transform"></i>
+                        <span>Sincronizar</span>
+                    </button>
+                    <button onclick="document.getElementById('debug-panel').classList.remove('hidden'); runDiagnostic();" class="hidden md:flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg hover:bg-red-100 transition-all text-sm font-medium shadow-sm">
+                        <i class="ph ph-bug text-lg"></i>
+                        <span>Debug</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Menú móvil -->
+            <div class="md:hidden flex justify-end gap-2 px-4 pb-3">
+                <button onclick="triggerImport()" class="flex-1 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 flex justify-center items-center gap-1 shadow-sm transition-colors">
+                    <i class="ph ph-upload-simple text-lg"></i> Importar
+                </button>
+                <button onclick="exportData()" class="flex-1 py-2 bg-indigo-50 border border-indigo-100 rounded-lg text-xs font-medium text-indigo-700 hover:bg-indigo-100 flex justify-center items-center gap-1 shadow-sm transition-colors">
+                    <i class="ph ph-download-simple text-lg"></i> Exportar
+                </button>
+                <button onclick="syncNow()" class="flex-1 py-2 bg-emerald-50 border border-emerald-100 rounded-lg text-xs font-medium text-emerald-700 hover:bg-emerald-100 flex justify-center items-center gap-1 shadow-sm transition-colors">
+                    <i class="ph ph-arrows-clockwise text-lg"></i> Sincronizar
+                </button>
+                <button onclick="document.getElementById('debug-panel').classList.remove('hidden'); runDiagnostic();" class="flex-1 py-2 bg-red-50 border border-red-100 rounded-lg text-xs font-medium text-red-600 hover:bg-red-100 flex justify-center items-center gap-1 shadow-sm transition-colors">
+                    <i class="ph ph-bug text-lg"></i> Debug
+                </button>
+            </div>
+        </header>
+
+        <!-- Contenido -->
+        <main class="flex-grow overflow-y-auto bg-slate-50 p-4">
+            <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+                <!-- 1. FORMULARIO -->
+                <div class="lg:col-span-3">
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 sticky top-4">
+                        <h2 class="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="ph ph-plus-circle text-indigo-600"></i>
+                            <span id="form-title">Nuevo Evento</span>
+                        </h2>
+                        <form id="event-form" class="space-y-3">
+                            <input type="hidden" id="edit-id">
+                            <div>
+                                <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Evento</label>
+                                <input type="text" id="event-title" required
+                                    class="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-indigo-500 outline-none text-sm transition-all"
+                                    placeholder="Ej: Examen de Historia">
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Lugar</label>
+                                <div class="relative mt-1">
+                                    <i class="ph ph-map-pin absolute left-3 top-2.5 text-slate-400"></i>
+                                    <input type="text" id="event-location"
+                                        class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:border-indigo-500 outline-none text-sm transition-all"
+                                        placeholder="Ej: Aula Magna">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Tipo de Evento</label>
+                                <div class="grid grid-cols-2 gap-2 mt-2" id="color-selector">
+                                    <label class="cursor-pointer border border-slate-200 rounded-lg p-2 flex items-center gap-2 hover:bg-slate-50 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
+                                        <input type="radio" name="event-color" value="red" class="peer sr-only">
+                                        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                                        <span class="text-xs font-medium text-slate-700">Examen</span>
+                                    </label>
+                                    <label class="cursor-pointer border border-slate-200 rounded-lg p-2 flex items-center gap-2 hover:bg-slate-50 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
+                                        <input type="radio" name="event-color" value="green" class="peer sr-only">
+                                        <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                                        <span class="text-xs font-medium text-slate-700">Médico</span>
+                                    </label>
+                                    <label class="cursor-pointer border border-slate-200 rounded-lg p-2 flex items-center gap-2 hover:bg-slate-50 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+                                        <input type="radio" name="event-color" value="blue" class="peer sr-only">
+                                        <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+                                        <span class="text-xs font-medium text-slate-700">Reunión</span>
+                                    </label>
+                                    <label class="cursor-pointer border border-slate-200 rounded-lg p-2 flex items-center gap-2 hover:bg-slate-50 transition-colors has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50">
+                                        <input type="radio" name="event-color" value="gold" class="peer sr-only">
+                                        <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+                                        <span class="text-xs font-medium text-slate-700">Otros</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Fecha</label>
+                                    <input type="date" id="event-date" required class="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Hora</label>
+                                    <input type="time" id="event-time" required class="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div class="pt-4 flex gap-2">
+                                <button type="submit" id="save-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors">Guardar</button>
+                                <button type="button" id="cancel-btn" onclick="resetForm()" class="hidden px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Cancelar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- 2. CALENDARIO -->
+                <div class="lg:col-span-5 flex flex-col h-full">
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 h-full">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="font-semibold text-slate-800 text-lg flex items-center gap-2">
+                                <i class="ph ph-calendar text-indigo-600"></i> Calendario
+                            </h2>
+                            <div class="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+                                <button onclick="changeMonth(-1)" class="p-1 hover:bg-white rounded"><i class="ph ph-caret-left"></i></button>
+                                <span id="calendar-month-year" class="text-sm font-semibold w-32 text-center text-slate-700"></span>
+                                <button onclick="changeMonth(1)" class="p-1 hover:bg-white rounded"><i class="ph ph-caret-right"></i></button>
+                            </div>
+                        </div>
+                        <div class="calendar-grid mb-2 text-center text-xs font-bold text-slate-400">
+                            <div class="py-1">LUN</div><div class="py-1">MAR</div><div class="py-1">MIE</div><div class="py-1">JUE</div><div class="py-1">VIE</div><div class="py-1 text-rose-400">SAB</div><div class="py-1 text-rose-400">DOM</div>
+                        </div>
+                        <div id="calendar-days" class="calendar-grid flex-grow"></div>
+                    </div>
+                </div>
+
+                <!-- 3. LISTA DE EVENTOS -->
+                <div class="lg:col-span-4">
+                    <div class="mb-4 relative">
+                        <i class="ph ph-magnifying-glass absolute left-3 top-3 text-slate-400 text-lg"></i>
+                        <input type="text" id="search-input" class="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500" placeholder="Buscar evento...">
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col max-h-[calc(100vh-180px)]">
+                        <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-xl">
+                            <h2 class="font-semibold text-slate-800 text-sm uppercase tracking-wide">Eventos</h2>
+                            <span id="event-count" class="text-xs font-bold bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-full">0</span>
+                        </div>
+                        <div class="overflow-y-auto p-4 flex-grow">
+                            <div id="empty-state" class="hidden flex-col items-center justify-center py-10 text-center">
+                                <i class="ph ph-calendar-x text-2xl text-slate-400 mb-2"></i>
+                                <p class="text-slate-500 text-sm">Sin eventos.</p>
+                            </div>
+                            <div id="no-results-state" class="hidden text-center py-8 text-slate-500 text-sm">No hay coincidencias.</div>
+                            <div id="events-container" class="space-y-3"></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </section>
+
+    <!-- PANEL DE DIAGNÓSTICO -->
+    <div id="debug-panel" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-slate-200">
+                <h3 class="font-bold text-slate-900 flex items-center gap-2"><i class="ph ph-bug text-red-500"></i> Diagnóstico de Sincronización</h3>
+                <button onclick="document.getElementById('debug-panel').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="ph ph-x text-xl"></i></button>
+            </div>
+            <div class="overflow-y-auto p-4 flex-grow">
+                <div id="debug-log" class="font-mono text-xs space-y-1"></div>
+            </div>
+            <div class="p-4 border-t border-slate-100 flex gap-2">
+                <button onclick="runDiagnostic()" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">▶ Ejecutar diagnóstico</button>
+                <button onclick="document.getElementById('debug-log').innerHTML=''" class="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">Limpiar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Borrar -->
+    <div id="delete-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm fade-in">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full">
+            <h3 class="text-lg font-bold text-slate-900 mb-2">¿Eliminar evento?</h3>
+            <p class="text-slate-500 text-sm">Esta acción no se puede deshacer.</p>
+            <div class="flex gap-3 mt-4">
+                <button onclick="closeDeleteModal()" class="flex-1 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50">Cancelar</button>
+                <button id="confirm-delete-btn" class="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Ver evento -->
+    <div id="view-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm fade-in">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full relative">
+            <button onclick="closeViewModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="ph ph-x text-xl"></i></button>
+            <div id="view-color-strip" class="h-1.5 w-12 rounded-full mb-4"></div>
+            <div class="mb-1"><span id="view-badge" class="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border"></span></div>
+            <h3 id="view-title" class="text-xl font-bold text-slate-900 mb-1"></h3>
+            <p id="view-location" class="text-slate-500 text-sm mb-6 flex items-center gap-1.5"><i class="ph ph-map-pin"></i> <span></span></p>
+            <div class="space-y-3">
+                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <i class="ph ph-calendar-blank text-xl text-indigo-600"></i>
+                    <div><p class="text-[10px] text-slate-400 font-bold uppercase">Fecha</p><p id="view-date" class="text-sm font-medium text-slate-700 capitalize"></p></div>
+                </div>
+                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <i class="ph ph-clock text-xl text-indigo-600"></i>
+                    <div><p class="text-[10px] text-slate-400 font-bold uppercase">Hora</p><p id="view-time" class="text-sm font-medium text-slate-700"></p></div>
+                </div>
+            </div>
+            <div class="mt-6 flex gap-3">
+                <button id="view-edit-btn" class="flex-1 py-2.5 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-100">Editar</button>
+                <button onclick="closeViewModal()" class="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Configuración de Nube -->
+    <div id="cloud-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm fade-in">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full relative">
+            <button onclick="closeCloudModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="ph ph-x text-xl"></i></button>
+            <div class="flex items-center gap-3 mb-5">
+                <div class="bg-emerald-100 text-emerald-600 w-10 h-10 rounded-xl flex items-center justify-center">
+                    <i class="ph ph-cloud text-xl"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-slate-900 text-lg">Sincronización en la Nube</h3>
+                    <p class="text-xs text-slate-500">Usando JSONBin.io (gratuito)</p>
+                </div>
+            </div>
+            <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-5 text-sm text-blue-800 space-y-1.5">
+                <p class="font-bold flex items-center gap-1.5"><i class="ph ph-info"></i> Solo necesitas 2 pasos:</p>
+                <ol class="list-decimal list-inside space-y-1 text-xs">
+                    <li>Ve a <a href="https://jsonbin.io" target="_blank" class="underline font-semibold">jsonbin.io</a> → crea cuenta gratuita (Google o email).</li>
+                    <li>En el menú de tu perfil → <strong>API Keys</strong> → <strong>"+ Create Access Key"</strong> → tipo <strong>Master Key</strong> → cópiala y pégala abajo.</li>
+                </ol>
+                <p class="text-xs text-blue-700 mt-1 font-medium">✨ El almacén en la nube se crea automáticamente, no tienes que hacer nada más.</p>
+            </div>
+            <div>
+                <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">API Key (Master Key)</label>
+                <input type="password" id="cloud-apikey-input"
+                    class="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
+                    placeholder="$2a$10$...">
+            </div>
+            <div id="cloud-test-result" class="hidden mt-3 p-3 rounded-lg text-sm font-medium"></div>
+            <div class="flex gap-3 mt-5">
+                <button onclick="testAndSaveCloud()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                    <i class="ph ph-check-circle"></i> Verificar y Guardar
+                </button>
+                <button onclick="clearCloudConfig()" class="px-4 py-2.5 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors" title="Eliminar configuración de nube">
+                    <i class="ph ph-trash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── CONSTANTES ──────────────────────────────────────────────
+        const STORAGE_KEY = 'agenda_events_v1';
+        const CLOUD_KEY   = 'agenda_cloud_cfg_v1';
+
+        const COLORS = {
+            red:  { label: 'Examen',     bg: 'bg-red-50',   text: 'text-red-700',   border: 'border-red-500',   dot: 'bg-red-500',   badge_bg: 'bg-red-100',   badge_border: 'border-red-200' },
+            green:{ label: 'Cita Médica',bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-500', dot: 'bg-green-500', badge_bg: 'bg-green-100', badge_border: 'border-green-200' },
+            blue: { label: 'Reunión',    bg: 'bg-blue-50',  text: 'text-blue-700',  border: 'border-blue-500',  dot: 'bg-blue-500',  badge_bg: 'bg-blue-100',  badge_border: 'border-blue-200' },
+            gold: { label: 'Otros',      bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-500', dot: 'bg-amber-500', badge_bg: 'bg-amber-100', badge_border: 'border-amber-200' }
+        };
+
+        // ── ESTADO ───────────────────────────────────────────────────
+        let events       = [];
+        let searchQuery  = '';
+        let deleteId     = null;
+        let calDate      = new Date();
+        let cloudCfg     = null;
+        let syncInProgress = false;
+
+        // ── DOM ──────────────────────────────────────────────────────
+        const dom = {
+            form:      document.getElementById('event-form'),
+            container: document.getElementById('events-container'),
+            calDays:   document.getElementById('calendar-days'),
+            calTitle:  document.getElementById('calendar-month-year'),
+            search:    document.getElementById('search-input'),
+            dateDisplay: document.getElementById('current-date-display'),
+            importInput: document.getElementById('import-input'),
+        };
+
+        // ── INIT ─────────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            dom.dateDisplay.textContent = new Date().toLocaleDateString('es-ES', {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            });
+
+            // Cargar config nube
+            try { cloudCfg = JSON.parse(localStorage.getItem(CLOUD_KEY)) || null; } catch { cloudCfg = null; }
+
+            loadEvents();
+            setDefaultDateTime();
+            updateCloudStatusUI();
+            render();
+
+            // Si hay nube configurada, sincronizar al arrancar
+            if (cloudCfg) setTimeout(() => syncNow(true), 500);
+
+            // Eventos de UI
+            dom.form.addEventListener('submit', handleSave);
+            dom.search.addEventListener('input', e => { searchQuery = e.target.value.toLowerCase().trim(); renderEvents(); });
+            document.getElementById('confirm-delete-btn').addEventListener('click', confirmDelete);
+            dom.importInput.addEventListener('change', handleImportFile);
+            document.getElementById('event-date').addEventListener('change', renderCalendar);
+        });
+
+        // ── PERSISTENCIA LOCAL ────────────────────────────────────────
+        function loadEvents() {
+            try { events = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { events = []; }
+        }
+
+        function saveLocal() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+        }
+
+        // Debounce para no llamar a la nube en cada tecla
+        let _syncTimer = null;
+        function saveEvents() {
+            saveLocal();
+            render();
+            if (cloudCfg) {
+                clearTimeout(_syncTimer);
+                _syncTimer = setTimeout(() => syncNow(true), 1500);
+            }
+        }
+
+        // ── RENDER ────────────────────────────────────────────────────
+        function render() {
+            renderEvents();
+            renderCalendar();
+        }
+
+        function renderEvents() {
+            dom.container.innerHTML = '';
+            const q = searchQuery;
+            const filtered = events.filter(ev => {
+                if (!q) return true;
+                const dateStr = new Date(ev.date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', month: 'long' });
+                const cat = COLORS[ev.color]?.label.toLowerCase() || '';
+                return ev.title.toLowerCase().includes(q)
+                    || (ev.location && ev.location.toLowerCase().includes(q))
+                    || ev.date.includes(q)
+                    || dateStr.includes(q)
+                    || cat.includes(q);
+            });
+
+            filtered.sort((a, b) => (`${a.date}T${a.time}`).localeCompare(`${b.date}T${b.time}`));
+
+            document.getElementById('event-count').textContent = filtered.length;
+            document.getElementById('empty-state').style.display   = events.length === 0 ? 'flex' : 'none';
+            document.getElementById('no-results-state').style.display = (events.length > 0 && filtered.length === 0) ? 'block' : 'none';
+
+            filtered.forEach(ev => {
+                const theme = COLORS[ev.color] || COLORS.gold;
+                const card = document.createElement('div');
+                card.className = `bg-white p-3 rounded-lg border-l-4 ${theme.border} shadow-sm hover:shadow-md transition-all flex gap-3 cursor-pointer group`;
+                card.innerHTML = `
+                    <div class="flex-grow min-w-0">
+                        <div class="flex justify-between items-start gap-2">
+                            <h4 class="font-bold text-slate-800 truncate">${ev.title}</h4>
+                            <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${theme.badge_bg} ${theme.text} border ${theme.badge_border} whitespace-nowrap">${theme.label}</span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1 text-xs text-slate-500">
+                            <span class="font-mono bg-slate-100 px-1 rounded text-slate-600">${ev.time}</span>
+                            <span class="flex items-center gap-1"><i class="ph ph-calendar"></i> ${new Date(ev.date + 'T12:00:00').toLocaleDateString('es-ES')}</span>
+                        </div>
+                        ${ev.location ? `<p class="text-xs text-slate-400 mt-1 flex items-center gap-1"><i class="ph ph-map-pin"></i>${ev.location}</p>` : ''}
+                    </div>
+                    <div class="flex flex-col justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onclick="editEvent('${ev.id}', event)" class="text-slate-400 hover:text-indigo-600"><i class="ph ph-pencil-simple text-lg"></i></button>
+                        <button onclick="promptDelete('${ev.id}', event)" class="text-slate-400 hover:text-red-600"><i class="ph ph-trash text-lg"></i></button>
+                    </div>`;
+                card.onclick = e => { if (!e.target.closest('button')) openView(ev); };
+                dom.container.appendChild(card);
+            });
+        }
+
+        function renderCalendar() {
+            const y = calDate.getFullYear();
+            const m = calDate.getMonth();
+            dom.calTitle.textContent = new Date(y, m).toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+            dom.calDays.innerHTML = '';
+
+            const firstDay    = new Date(y, m, 1).getDay();
+            const daysInMonth = new Date(y, m + 1, 0).getDate();
+            const startPad    = firstDay === 0 ? 6 : firstDay - 1;
+
+            for (let i = 0; i < startPad; i++) {
+                dom.calDays.appendChild(Object.assign(document.createElement('div'), { className: 'bg-slate-50/50 rounded min-h-[50px]' }));
+            }
+
+            const today        = new Date().toISOString().split('T')[0];
+            const selectedDate = document.getElementById('event-date').value;
+
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr  = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const dayEvs   = events.filter(e => e.date === dateStr);
+                const isToday  = dateStr === today;
+                const isSel    = dateStr === selectedDate;
+
+                let bgClass   = 'bg-white border border-slate-100 hover:border-indigo-300';
+                let textClass  = 'text-slate-600';
+                if (isSel)       { bgClass = 'bg-indigo-600 text-white shadow-md border-indigo-600'; textClass = 'text-white'; }
+                else if (isToday){ bgClass = 'bg-indigo-50 ring-1 ring-indigo-500'; textClass = 'text-indigo-600'; }
+
+                const cell = document.createElement('div');
+                cell.className = `${bgClass} rounded p-1 min-h-[50px] cursor-pointer transition-colors`;
+                cell.onclick = () => {
+                    document.getElementById('event-date').value = dateStr;
+                    dom.search.value = dateStr;
+                    searchQuery = dateStr;
+                    renderEvents();
+                    renderCalendar();
+                };
+
+                const dots = dayEvs.map(ev => {
+                    const dotColor = isSel ? 'bg-white' : (COLORS[ev.color]?.dot || 'bg-amber-500');
+                    return `<div class="w-1.5 h-1.5 rounded-full ${dotColor}"></div>`;
+                }).join('');
+
+                cell.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <span class="text-xs font-semibold ${textClass}">${d}</span>
+                        <div class="flex gap-0.5 flex-wrap max-w-[20px] justify-end">${dots}</div>
+                    </div>`;
+                dom.calDays.appendChild(cell);
+            }
+        }
+
+        // ── FORMULARIO ────────────────────────────────────────────────
+        function handleSave(e) {
+            e.preventDefault();
+            const id       = document.getElementById('edit-id').value;
+            const title    = document.getElementById('event-title').value.trim();
+            const location = document.getElementById('event-location').value.trim();
+            const date     = document.getElementById('event-date').value;
+            const time     = document.getElementById('event-time').value;
+            const colorEl  = document.querySelector('input[name="event-color"]:checked');
+            const color    = colorEl ? colorEl.value : 'gold';
+
+            const updatedAt = Date.now().toString();
+            if (id) {
+                const idx = events.findIndex(ev => ev.id === id);
+                if (idx !== -1) events[idx] = { id, title, location, date, time, color, updatedAt };
+            } else {
+                events.push({ id: Date.now().toString(), title, location, date, time, color, updatedAt });
+            }
+            saveEvents();
+            resetForm();
+            showNotif('success', 'Guardado', 'Evento registrado correctamente.');
+        }
+
+        // ── HELPERS GLOBALES ──────────────────────────────────────────
+        window.changeMonth = step => { calDate.setMonth(calDate.getMonth() + step); renderCalendar(); };
+
+        window.resetForm = function () {
+            dom.form.reset();
+            setDefaultDateTime();
+            const gold = document.querySelector('input[value="gold"]');
+            if (gold) gold.checked = true;
+            document.getElementById('edit-id').value = '';
+            document.getElementById('form-title').textContent = 'Nuevo Evento';
+            document.getElementById('save-btn').textContent = 'Guardar';
+            document.getElementById('cancel-btn').classList.add('hidden');
+        };
+
+        window.editEvent = (id, e) => {
+            if (e) e.stopPropagation();
+            const ev = events.find(x => x.id === id);
+            if (!ev) return;
+            document.getElementById('edit-id').value         = ev.id;
+            document.getElementById('event-title').value     = ev.title;
+            document.getElementById('event-location').value  = ev.location || '';
+            document.getElementById('event-date').value      = ev.date;
+            document.getElementById('event-time').value      = ev.time;
+            const radio = document.querySelector(`input[value="${ev.color}"]`);
+            if (radio) radio.checked = true;
+            document.getElementById('form-title').textContent = 'Editar Evento';
+            document.getElementById('save-btn').textContent   = 'Actualizar';
+            document.getElementById('cancel-btn').classList.remove('hidden');
+        };
+
+        window.promptDelete = (id, e) => {
+            if (e) e.stopPropagation();
+            deleteId = id;
+            document.getElementById('delete-modal').classList.remove('hidden');
+        };
+
+        window.closeDeleteModal = () => document.getElementById('delete-modal').classList.add('hidden');
+
+        function confirmDelete() {
+            if (!deleteId) return;
+            events = events.filter(x => x.id !== deleteId);
+            if (document.getElementById('edit-id').value === deleteId) resetForm();
+            deleteId = null;
+            closeDeleteModal();
+            saveEvents();
+        }
+
+        function openView(ev) {
+            const theme = COLORS[ev.color] || COLORS.gold;
+            document.getElementById('view-color-strip').className = `h-1.5 w-12 rounded-full mb-3 ${theme.dot}`;
+            const badge = document.getElementById('view-badge');
+            badge.className   = `text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${theme.badge_bg} ${theme.text} ${theme.badge_border}`;
+            badge.textContent = theme.label;
+            document.getElementById('view-title').textContent = ev.title;
+            document.getElementById('view-location').querySelector('span').textContent = ev.location || 'Sin ubicación';
+            document.getElementById('view-date').textContent  = new Date(ev.date + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+            document.getElementById('view-time').textContent  = ev.time;
+            document.getElementById('view-edit-btn').onclick  = () => { closeViewModal(); editEvent(ev.id); };
+            document.getElementById('view-modal').classList.remove('hidden');
+        }
+        window.closeViewModal = () => document.getElementById('view-modal').classList.add('hidden');
+
+        function setDefaultDateTime() {
+            const now = new Date();
+            document.getElementById('event-date').value = now.toISOString().split('T')[0];
+            document.getElementById('event-time').value = now.toTimeString().slice(0, 5);
+        }
+
+        // ── IMPORTAR / EXPORTAR ───────────────────────────────────────
+        window.exportData = function () {
+            const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
+            const url  = URL.createObjectURL(blob);
+            const a    = Object.assign(document.createElement('a'), { href: url, download: `agenda_${new Date().toISOString().split('T')[0]}.json` });
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showNotif('success', 'Exportado', 'Copia de seguridad descargada.');
+        };
+
+        window.triggerImport = () => dom.importInput.click();
+
+        function handleImportFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                try {
+                    const imported = JSON.parse(ev.target.result);
+                    if (Array.isArray(imported)) {
+                        // Fusionar con los existentes
+                        const merged = [...events];
+                        for (const imp of imported) {
+                            if (!merged.find(x => x.id === imp.id)) merged.push(imp);
+                        }
+                        events = merged;
+                        saveEvents();
+                        showNotif('success', 'Importado', `${imported.length} eventos cargados.`);
+                    } else throw new Error();
+                } catch { showNotif('error', 'Error', 'Archivo inválido o corrupto.'); }
+                dom.importInput.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        // ── NOTIFICACIONES ────────────────────────────────────────────
+        function showNotif(type, title, msg) {
+            const n     = document.getElementById('notification');
+            const isOk  = type === 'success';
+            n.className = `fixed bottom-4 right-4 z-50 transform transition-all duration-300 translate-x-0 opacity-100 max-w-xs w-full bg-white border-l-4 ${isOk ? 'border-emerald-500' : 'border-red-500'} p-4 rounded shadow-lg flex items-center gap-3`;
+            document.getElementById('notif-title').textContent = title;
+            document.getElementById('notif-msg').textContent   = msg;
+            clearTimeout(n._t);
+            n._t = setTimeout(() => { n.classList.add('translate-x-full', 'opacity-0'); }, 3000);
+        }
+
+        // ── SINCRONIZACIÓN EN LA NUBE (JSONBin.io) ───────────────────
+        function updateCloudStatusUI(status) {
+            const el    = document.getElementById('cloud-status');
+            const icon  = document.getElementById('cloud-icon');
+            const label = document.getElementById('cloud-label');
+            if (!cloudCfg) {
+                el.className    = 'flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 cursor-pointer transition-colors';
+                icon.className  = 'ph ph-cloud text-sm';
+                label.textContent = 'Sin configurar';
+            } else if (status === 'syncing') {
+                el.className    = 'flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 cursor-pointer transition-colors';
+                icon.className  = 'ph ph-arrows-clockwise text-sm spin';
+                label.textContent = 'Sincronizando…';
+            } else if (status === 'ok') {
+                el.className    = 'flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 cursor-pointer transition-colors';
+                icon.className  = 'ph ph-cloud-check text-sm';
+                label.textContent = 'Sincronizado';
+            } else if (status === 'error') {
+                el.className    = 'flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 cursor-pointer transition-colors';
+                icon.className  = 'ph ph-cloud-slash text-sm';
+                label.textContent = 'Error de sync';
+            } else {
+                el.className    = 'flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 cursor-pointer transition-colors';
+                icon.className  = 'ph ph-cloud text-sm';
+                label.textContent = 'Configurado';
+            }
+        }
+
+        // Sube los eventos locales a la nube
+        async function pushToCloud() {
+            if (!cloudCfg) return false;
+            try {
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${cloudCfg.binId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Master-Key': cloudCfg.apiKey },
+                    body: JSON.stringify(events)
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return true;
+            } catch (e) {
+                console.error('pushToCloud:', e);
+                return false;
+            }
+        }
+
+        // Lee los eventos de la nube
+        async function fetchFromCloud() {
+            if (!cloudCfg) return null;
+            try {
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${cloudCfg.binId}/latest`, {
+                    headers: { 'X-Master-Key': cloudCfg.apiKey }
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const rec  = data.record;
+                // Aceptar tanto array plano como {events:[...]}
+                if (Array.isArray(rec)) return rec.filter(e => e.id && e.title);
+                if (Array.isArray(rec?.events)) return rec.events.filter(e => e.id && e.title);
+                return [];
+            } catch (e) {
+                console.error('fetchFromCloud:', e);
+                return null;
+            }
+        }
+
+        // Sincronización completa: fusión real por ID en ambas direcciones
+        window.syncNow = async function (silent = false) {
+            if (!cloudCfg) { openCloudConfig(); return; }
+            if (syncInProgress) return;
+            syncInProgress = true;
+            updateCloudStatusUI('syncing');
+            try {
+                const remote = await fetchFromCloud();
+                if (remote === null) throw new Error('No se pudo leer la nube');
+
+                // Mapa de eventos locales por ID
+                const localMap  = new Map(events.map(e => [e.id, e]));
+                // Mapa de eventos remotos por ID
+                const remoteMap = new Map(remote.map(e => [e.id, e]));
+
+                // Unión completa: todos los IDs de ambos lados
+                const allIds = new Set([...localMap.keys(), ...remoteMap.keys()]);
+                const merged = [];
+                for (const id of allIds) {
+                    const local  = localMap.get(id);
+                    const rem    = remoteMap.get(id);
+                    if (local && rem) {
+                        // Existe en ambos: usar el que tenga updatedAt más reciente
+                        // Si no hay timestamp, preferir el remoto (viene de otro dispositivo)
+                        const localTs  = local.updatedAt  || local.id  || 0;
+                        const remoteTs = rem.updatedAt || rem.id || 0;
+                        merged.push(String(localTs) >= String(remoteTs) ? local : rem);
+                    } else {
+                        // Solo existe en uno de los dos lados → incluirlo
+                        merged.push(local || rem);
+                    }
+                }
+
+                events = merged;
+                saveLocal();
+                render();
+
+                // Subir la versión fusionada para que la nube quede igual
+                const ok = await pushToCloud();
+                if (ok) {
+                    updateCloudStatusUI('ok');
+                    if (!silent) showNotif('success', 'Sincronizado', `${merged.length} eventos sincronizados.`);
+                } else {
+                    throw new Error('Fallo al subir datos fusionados');
+                }
+            } catch (e) {
+                updateCloudStatusUI('error');
+                showNotif('error', 'Error de sincronización', e.message);
+            } finally {
+                syncInProgress = false;
+            }
+        };
+
+        // ── CONFIG NUBE ───────────────────────────────────────────────
+        window.openCloudConfig = function () {
+            if (cloudCfg) {
+                document.getElementById('cloud-apikey-input').value = cloudCfg.apiKey || '';
+            }
+            document.getElementById('cloud-test-result').classList.add('hidden');
+            document.getElementById('cloud-modal').classList.remove('hidden');
+        };
+
+        window.closeCloudModal = () => document.getElementById('cloud-modal').classList.add('hidden');
+
+        window.testAndSaveCloud = async function () {
+            const apiKey   = document.getElementById('cloud-apikey-input').value.trim();
+            const resultEl = document.getElementById('cloud-test-result');
+
+            if (!apiKey) {
+                resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-red-50 text-red-700 border border-red-200';
+                resultEl.textContent = '⚠️ Pega tu API Key antes de continuar.';
+                resultEl.classList.remove('hidden');
+                return;
+            }
+
+            resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200';
+            resultEl.classList.remove('hidden');
+
+            // Si ya tenemos binId guardado, verificar que sigue siendo válido
+            const existingBinId = cloudCfg?.binId || null;
+            if (existingBinId) {
+                resultEl.textContent = '⏳ Verificando almacén existente…';
+                try {
+                    const check = await fetch(`https://api.jsonbin.io/v3/b/${existingBinId}/latest`, {
+                        headers: { 'X-Master-Key': apiKey }
+                    });
+                    if (check.ok) {
+                        const data = await check.json();
+                        cloudCfg = { apiKey, binId: existingBinId };
+                        localStorage.setItem(CLOUD_KEY, JSON.stringify(cloudCfg));
+                        await _mergeAndFinish(data.record, resultEl);
+                        return;
+                    }
+                } catch {}
+            }
+
+            // Crear un bin nuevo automáticamente
+            resultEl.textContent = '⏳ Creando almacén en la nube…';
+            try {
+                const res = await fetch('https://api.jsonbin.io/v3/b', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': apiKey,
+                        'X-Bin-Name': 'MiAgenda'
+                    },
+                    body: JSON.stringify([{"_init": true}])
+                });
+                const rawText = await res.text();
+                if (!res.ok) {
+                    let errMsg = 'HTTP ' + res.status;
+                    try { errMsg = JSON.parse(rawText).message || errMsg; } catch {}
+                    throw new Error(errMsg);
+                }
+                const created = JSON.parse(rawText);
+                const binId   = created.metadata?.id;
+                if (!binId) throw new Error('No se pudo obtener el ID del almacén. Respuesta: ' + rawText.slice(0, 100));
+
+                cloudCfg = { apiKey, binId };
+                localStorage.setItem(CLOUD_KEY, JSON.stringify(cloudCfg));
+                await _mergeAndFinish([], resultEl);
+
+            } catch (err) {
+                resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-red-50 text-red-700 border border-red-200';
+                resultEl.textContent = `❌ Error: ${err.message}. Comprueba que la API Key es correcta.`;
+                updateCloudStatusUI('error');
+            }
+        };
+
+        async function _mergeAndFinish(remote, resultEl) {
+            resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200';
+            resultEl.textContent = '✅ Conexión exitosa. Sincronizando datos…';
+            const remoteArr = Array.isArray(remote) ? remote.filter(e => e.id && e.title) : [];
+            // Fusión bidireccional: combinar local + remoto sin perder ninguno
+            const localMap  = new Map(events.map(e => [e.id, e]));
+            const remoteMap = new Map(remoteArr.map(e => [e.id, e]));
+            const allIds    = new Set([...localMap.keys(), ...remoteMap.keys()]);
+            const merged    = [];
+            for (const id of allIds) {
+                merged.push(localMap.get(id) || remoteMap.get(id));
+            }
+            events = merged;
+            saveLocal();
+            render();
+            const ok = await pushToCloud();
+            updateCloudStatusUI(ok ? 'ok' : 'error');
+            setTimeout(() => {
+                closeCloudModal();
+                showNotif('success', 'Nube configurada', `${merged.length} eventos sincronizados.`);
+            }, 1200);
+        }
+
+        window.clearCloudConfig = function () {
+            if (!confirm('¿Eliminar la configuración de nube? Los datos locales se conservan.')) return;
+            cloudCfg = null;
+            localStorage.removeItem(CLOUD_KEY);
+            updateCloudStatusUI();
+            closeCloudModal();
+            showNotif('success', 'Configuración eliminada', 'La app funciona ahora solo en local.');
+        };
+        // ── DIAGNÓSTICO ───────────────────────────────────────────
+        function debugLog(msg, type='info') {
+            const el = document.getElementById('debug-log');
+            const colors = { info: 'text-slate-700', ok: 'text-emerald-600 font-bold', error: 'text-red-600 font-bold', warn: 'text-amber-600 font-bold' };
+            const icons  = { info: '·', ok: '✓', error: '✗', warn: '!' };
+            const line   = document.createElement('div');
+            line.className = colors[type] || 'text-slate-700';
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${icons[type]} ${msg}`;
+            el.appendChild(line);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        window.runDiagnostic = async function() {
+            const log = document.getElementById('debug-log');
+            log.innerHTML = '';
+            debugLog('=== INICIO DIAGNÓSTICO ===');
+
+            // 1. Config local
+            debugLog(`Eventos locales: ${events.length}`);
+            const raw = localStorage.getItem(CLOUD_KEY);
+            if (!raw) {
+                debugLog('❌ No hay API Key guardada en este dispositivo', 'error');
+                debugLog('→ Haz clic en "Sin configurar" y configura la API Key', 'warn');
+                return;
+            }
+            let cfg;
+            try { cfg = JSON.parse(raw); } catch { debugLog('Config guardada corrupta', 'error'); return; }
+            debugLog(`API Key: ${cfg.apiKey ? cfg.apiKey.slice(0,10) + '…' : 'VACÍA'}`, cfg.apiKey ? 'ok' : 'error');
+            debugLog(`Bin ID: ${cfg.binId || 'VACÍO'}`, cfg.binId ? 'ok' : 'error');
+
+            if (!cfg.apiKey || !cfg.binId) {
+                debugLog('Falta API Key o Bin ID — reconfigura la nube', 'error');
+                return;
+            }
+
+            // 2. Test conexión a JSONBin
+            debugLog('Probando conexión a JSONBin…');
+            try {
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, {
+                    headers: { 'X-Master-Key': cfg.apiKey }
+                });
+                const text = await res.text();
+                debugLog(`Respuesta HTTP: ${res.status}`, res.ok ? 'ok' : 'error');
+                if (!res.ok) {
+                    debugLog(`Detalle: ${text.slice(0, 200)}`, 'error');
+                    if (res.status === 401) debugLog('→ API Key incorrecta o caducada', 'warn');
+                    if (res.status === 404) debugLog('→ Bin ID no existe', 'warn');
+                    return;
+                }
+                let data;
+                try { data = JSON.parse(text); } catch { debugLog('Respuesta no es JSON válido: ' + text.slice(0,100), 'error'); return; }
+                const rec = data.record;
+                const remoteArr = Array.isArray(rec) ? rec : (Array.isArray(rec?.events) ? rec.events : null);
+                if (remoteArr === null) {
+                    debugLog(`Formato inesperado en nube: ${JSON.stringify(rec).slice(0,100)}`, 'warn');
+                } else {
+                    debugLog(`Eventos en la nube: ${remoteArr.length}`, 'ok');
+                }
+            } catch(e) {
+                debugLog(`Error de red: ${e.message}`, 'error');
+                debugLog('→ Comprueba conexión a internet', 'warn');
+                return;
+            }
+
+            // 3. Test escritura
+            debugLog('Probando escritura en la nube…');
+            try {
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.apiKey },
+                    body: JSON.stringify(events)
+                });
+                debugLog(`Escritura HTTP: ${res.status}`, res.ok ? 'ok' : 'error');
+                if (res.ok) debugLog(`${events.length} eventos subidos correctamente`, 'ok');
+                else {
+                    const t = await res.text();
+                    debugLog(`Error escritura: ${t.slice(0,200)}`, 'error');
+                }
+            } catch(e) {
+                debugLog(`Error escribiendo: ${e.message}`, 'error');
+            }
+
+            debugLog('=== FIN DIAGNÓSTICO ===');
+        };
+    </script>
+</body>
+</html>
