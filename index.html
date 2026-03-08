@@ -30,7 +30,7 @@
     <input type="file" id="import-input" accept=".json" class="hidden">
 
     <!-- Notificación Flotante -->
-    <div id="notification" class="fixed bottom-4 right-4 z-50 transform transition-all duration-300 translate-x-full opacity-0 max-w-xs w-full bg-white border-l-4 p-4 rounded shadow-lg flex items-center gap-3">
+    <div id="notification" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 transform transition-all duration-300 -translate-y-20 opacity-0 max-w-xs w-full bg-white border-l-4 p-3 rounded-xl shadow-lg flex items-center gap-3">
         <div>
             <p id="notif-title" class="font-bold text-sm"></p>
             <p id="notif-msg" class="text-xs text-slate-500"></p>
@@ -329,6 +329,7 @@
 
         // ── ESTADO ───────────────────────────────────────────────────
         let events       = [];
+        let deletedIds   = new Set(); // IDs eliminados (tombstones)
         let searchQuery  = '';
         let deleteId     = null;
         let calDate      = new Date();
@@ -374,10 +375,12 @@
         // ── PERSISTENCIA LOCAL ────────────────────────────────────────
         function loadEvents() {
             try { events = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { events = []; }
+            try { deletedIds = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY + '_deleted')) || []); } catch { deletedIds = new Set(); }
         }
 
         function saveLocal() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+            localStorage.setItem(STORAGE_KEY + '_deleted', JSON.stringify([...deletedIds]));
         }
 
         // Debounce para no llamar a la nube en cada tecla
@@ -557,6 +560,7 @@
 
         function confirmDelete() {
             if (!deleteId) return;
+            deletedIds.add(deleteId);
             events = events.filter(x => x.id !== deleteId);
             if (document.getElementById('edit-id').value === deleteId) resetForm();
             deleteId = null;
@@ -622,13 +626,18 @@
 
         // ── NOTIFICACIONES ────────────────────────────────────────────
         function showNotif(type, title, msg) {
-            const n     = document.getElementById('notification');
-            const isOk  = type === 'success';
-            n.className = `fixed bottom-4 right-4 z-50 transform transition-all duration-300 translate-x-0 opacity-100 max-w-xs w-full bg-white border-l-4 ${isOk ? 'border-emerald-500' : 'border-red-500'} p-4 rounded shadow-lg flex items-center gap-3`;
+            const n    = document.getElementById('notification');
+            const isOk = type === 'success';
+            // Mostrar
+            n.className = `fixed top-4 left-1/2 -translate-x-1/2 z-50 transform transition-all duration-300 translate-y-0 opacity-100 max-w-xs w-full bg-white border-l-4 ${isOk ? 'border-emerald-500' : 'border-red-500'} p-3 rounded-xl shadow-lg flex items-center gap-3`;
             document.getElementById('notif-title').textContent = title;
             document.getElementById('notif-msg').textContent   = msg;
             clearTimeout(n._t);
-            n._t = setTimeout(() => { n.classList.add('translate-x-full', 'opacity-0'); }, 3000);
+            // Ocultar tras 2.5s
+            n._t = setTimeout(() => {
+                n.classList.remove('translate-y-0', 'opacity-100');
+                n.classList.add('-translate-y-20', 'opacity-0');
+            }, 2500);
         }
 
         // ── SINCRONIZACIÓN EN LA NUBE (JSONBin.io) ───────────────────
@@ -659,14 +668,15 @@
             }
         }
 
-        // Sube los eventos locales a la nube
+        // Sube los eventos y lista de eliminados a la nube
         async function pushToCloud() {
             if (!cloudCfg) return false;
             try {
+                const payload = { events, deleted: [...deletedIds] };
                 const res = await fetch(`https://api.jsonbin.io/v3/b/${cloudCfg.binId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Master-Key': cloudCfg.apiKey },
-                    body: JSON.stringify(events)
+                    body: JSON.stringify(payload)
                 });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 return true;
@@ -676,7 +686,7 @@
             }
         }
 
-        // Lee los eventos de la nube
+        // Lee los eventos y eliminados de la nube
         async function fetchFromCloud() {
             if (!cloudCfg) return null;
             try {
@@ -686,54 +696,64 @@
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 const rec  = data.record;
-                // Aceptar tanto array plano como {events:[...]}
-                if (Array.isArray(rec)) return rec.filter(e => e.id && e.title);
-                if (Array.isArray(rec?.events)) return rec.events.filter(e => e.id && e.title);
-                return [];
+                // Formato nuevo: { events: [...], deleted: [...] }
+                if (rec?.events !== undefined) {
+                    return {
+                        events:  (rec.events  || []).filter(e => e.id && e.title),
+                        deleted: rec.deleted  || []
+                    };
+                }
+                // Formato antiguo: array plano → convertir
+                if (Array.isArray(rec)) {
+                    return { events: rec.filter(e => e.id && e.title), deleted: [] };
+                }
+                return { events: [], deleted: [] };
             } catch (e) {
                 console.error('fetchFromCloud:', e);
                 return null;
             }
         }
 
-        // Sincronización completa: fusión real por ID en ambas direcciones
+        // Sincronización completa con soporte de eliminaciones (tombstones)
         window.syncNow = async function (silent = false) {
             if (!cloudCfg) { openCloudConfig(); return; }
             if (syncInProgress) return;
             syncInProgress = true;
             updateCloudStatusUI('syncing');
             try {
-                const remote = await fetchFromCloud();
-                if (remote === null) throw new Error('No se pudo leer la nube');
+                const remoteData = await fetchFromCloud();
+                if (remoteData === null) throw new Error('No se pudo leer la nube');
 
-                // Mapa de eventos locales por ID
+                const remoteEvents  = remoteData.events  || [];
+                const remoteDeleted = new Set(remoteData.deleted || []);
+
+                // Unir listas de eliminados de ambos lados
+                const allDeleted = new Set([...deletedIds, ...remoteDeleted]);
+
+                // Fusionar eventos filtrando los eliminados
                 const localMap  = new Map(events.map(e => [e.id, e]));
-                // Mapa de eventos remotos por ID
-                const remoteMap = new Map(remote.map(e => [e.id, e]));
+                const remoteMap = new Map(remoteEvents.map(e => [e.id, e]));
+                const allIds    = new Set([...localMap.keys(), ...remoteMap.keys()]);
 
-                // Unión completa: todos los IDs de ambos lados
-                const allIds = new Set([...localMap.keys(), ...remoteMap.keys()]);
                 const merged = [];
                 for (const id of allIds) {
-                    const local  = localMap.get(id);
-                    const rem    = remoteMap.get(id);
+                    if (allDeleted.has(id)) continue; // eliminado en algún dispositivo → ignorar
+                    const local = localMap.get(id);
+                    const rem   = remoteMap.get(id);
                     if (local && rem) {
-                        // Existe en ambos: usar el que tenga updatedAt más reciente
-                        // Si no hay timestamp, preferir el remoto (viene de otro dispositivo)
-                        const localTs  = local.updatedAt  || local.id  || 0;
-                        const remoteTs = rem.updatedAt || rem.id || 0;
-                        merged.push(String(localTs) >= String(remoteTs) ? local : rem);
+                        const localTs  = Number(local.updatedAt  || local.id  || 0);
+                        const remoteTs = Number(rem.updatedAt || rem.id || 0);
+                        merged.push(localTs >= remoteTs ? local : rem);
                     } else {
-                        // Solo existe en uno de los dos lados → incluirlo
                         merged.push(local || rem);
                     }
                 }
 
-                events = merged;
+                events     = merged;
+                deletedIds = allDeleted;
                 saveLocal();
                 render();
 
-                // Subir la versión fusionada para que la nube quede igual
                 const ok = await pushToCloud();
                 if (ok) {
                     updateCloudStatusUI('ok');
@@ -835,19 +855,24 @@
             }
         };
 
-        async function _mergeAndFinish(remote, resultEl) {
+        async function _mergeAndFinish(remoteRaw, resultEl) {
             resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200';
             resultEl.textContent = '✅ Conexión exitosa. Sincronizando datos…';
-            const remoteArr = Array.isArray(remote) ? remote.filter(e => e.id && e.title) : [];
-            // Fusión bidireccional: combinar local + remoto sin perder ninguno
-            const localMap  = new Map(events.map(e => [e.id, e]));
-            const remoteMap = new Map(remoteArr.map(e => [e.id, e]));
-            const allIds    = new Set([...localMap.keys(), ...remoteMap.keys()]);
-            const merged    = [];
+            // Normalizar formato
+            const remoteArr     = Array.isArray(remoteRaw) ? remoteRaw.filter(e => e.id && e.title)
+                                : (remoteRaw?.events || []).filter(e => e.id && e.title);
+            const remoteDeleted = new Set(Array.isArray(remoteRaw) ? [] : (remoteRaw?.deleted || []));
+            const allDeleted    = new Set([...deletedIds, ...remoteDeleted]);
+            const localMap      = new Map(events.map(e => [e.id, e]));
+            const remoteMap     = new Map(remoteArr.map(e => [e.id, e]));
+            const allIds        = new Set([...localMap.keys(), ...remoteMap.keys()]);
+            const merged        = [];
             for (const id of allIds) {
+                if (allDeleted.has(id)) continue;
                 merged.push(localMap.get(id) || remoteMap.get(id));
             }
-            events = merged;
+            events     = merged;
+            deletedIds = allDeleted;
             saveLocal();
             render();
             const ok = await pushToCloud();
