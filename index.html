@@ -297,6 +297,12 @@
                     class="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
                     placeholder="$2a$10$...">
             </div>
+            <div class="mt-3">
+                <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Bin ID <span class="text-slate-400 font-normal normal-case">(déjalo vacío para crear uno nuevo)</span></label>
+                <input type="text" id="cloud-binid-input"
+                    class="w-full mt-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
+                    placeholder="69ad3e0ad0ea881f40fbde1e">
+            </div>
             <div id="cloud-test-result" class="hidden mt-3 p-3 rounded-lg text-sm font-medium"></div>
             <div class="flex gap-3 mt-5">
                 <button onclick="testAndSaveCloud()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
@@ -747,6 +753,7 @@
         window.openCloudConfig = function () {
             if (cloudCfg) {
                 document.getElementById('cloud-apikey-input').value = cloudCfg.apiKey || '';
+                document.getElementById('cloud-binid-input').value  = cloudCfg.binId  || '';
             }
             document.getElementById('cloud-test-result').classList.add('hidden');
             document.getElementById('cloud-modal').classList.remove('hidden');
@@ -755,8 +762,9 @@
         window.closeCloudModal = () => document.getElementById('cloud-modal').classList.add('hidden');
 
         window.testAndSaveCloud = async function () {
-            const apiKey   = document.getElementById('cloud-apikey-input').value.trim();
-            const resultEl = document.getElementById('cloud-test-result');
+            const apiKey      = document.getElementById('cloud-apikey-input').value.trim();
+            const manualBinId = document.getElementById('cloud-binid-input').value.trim();
+            const resultEl    = document.getElementById('cloud-test-result');
 
             if (!apiKey) {
                 resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-red-50 text-red-700 border border-red-200';
@@ -768,25 +776,33 @@
             resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200';
             resultEl.classList.remove('hidden');
 
-            // Si ya tenemos binId guardado, verificar que sigue siendo válido
-            const existingBinId = cloudCfg?.binId || null;
-            if (existingBinId) {
-                resultEl.textContent = '⏳ Verificando almacén existente…';
+            // Si el usuario ha introducido un Bin ID manualmente, usarlo directamente
+            const binIdToUse = manualBinId || cloudCfg?.binId || null;
+
+            if (binIdToUse) {
+                resultEl.textContent = '⏳ Verificando almacén…';
                 try {
-                    const check = await fetch(`https://api.jsonbin.io/v3/b/${existingBinId}/latest`, {
+                    const check = await fetch(`https://api.jsonbin.io/v3/b/${binIdToUse}/latest`, {
                         headers: { 'X-Master-Key': apiKey }
                     });
                     if (check.ok) {
                         const data = await check.json();
-                        cloudCfg = { apiKey, binId: existingBinId };
+                        cloudCfg = { apiKey, binId: binIdToUse };
                         localStorage.setItem(CLOUD_KEY, JSON.stringify(cloudCfg));
                         await _mergeAndFinish(data.record, resultEl);
                         return;
+                    } else {
+                        throw new Error('HTTP ' + check.status + ' — Bin ID o API Key incorrectos');
                     }
-                } catch {}
+                } catch(err) {
+                    resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-red-50 text-red-700 border border-red-200';
+                    resultEl.textContent = `❌ Error: ${err.message}`;
+                    updateCloudStatusUI('error');
+                    return;
+                }
             }
 
-            // Crear un bin nuevo automáticamente
+            // Sin Bin ID: crear uno nuevo automáticamente
             resultEl.textContent = '⏳ Creando almacén en la nube…';
             try {
                 const res = await fetch('https://api.jsonbin.io/v3/b', {
@@ -806,7 +822,7 @@
                 }
                 const created = JSON.parse(rawText);
                 const binId   = created.metadata?.id;
-                if (!binId) throw new Error('No se pudo obtener el ID del almacén. Respuesta: ' + rawText.slice(0, 100));
+                if (!binId) throw new Error('No se pudo obtener el ID. Respuesta: ' + rawText.slice(0, 100));
 
                 cloudCfg = { apiKey, binId };
                 localStorage.setItem(CLOUD_KEY, JSON.stringify(cloudCfg));
@@ -814,7 +830,7 @@
 
             } catch (err) {
                 resultEl.className   = 'mt-3 p-3 rounded-lg text-sm font-medium bg-red-50 text-red-700 border border-red-200';
-                resultEl.textContent = `❌ Error: ${err.message}. Comprueba que la API Key es correcta.`;
+                resultEl.textContent = `❌ Error: ${err.message}`;
                 updateCloudStatusUI('error');
             }
         };
