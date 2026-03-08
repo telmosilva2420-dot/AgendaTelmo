@@ -565,7 +565,14 @@
             if (document.getElementById('edit-id').value === deleteId) resetForm();
             deleteId = null;
             closeDeleteModal();
-            saveEvents();
+            // Guardar local y subir a nube inmediatamente (sin debounce)
+            saveLocal();
+            render();
+            if (cloudCfg) {
+                clearTimeout(_syncTimer);
+                syncInProgress = false; // forzar desbloqueo por si acaso
+                syncNow(true);
+            }
         }
 
         function openView(ev) {
